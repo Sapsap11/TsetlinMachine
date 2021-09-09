@@ -6,6 +6,7 @@ use rand::rngs::ThreadRng;
 use rand::Rng;
 use std::cmp::min;
 
+#[derive(Debug, Default)]
 pub struct TsetlinMachine {
     input_states: BitVec,
     output_states: BitVec,
@@ -31,10 +32,8 @@ impl TsetlinMachine {
             if it.is_none() {
                 self.outputs[oi].clauses[ci].inclusions.push(ai);
             }
-        } else {
-            if it.is_some() {
-                self.outputs[oi].clauses[ci].inclusions.remove(it.unwrap());
-            }
+        } else if let Some(it) = it {
+            self.outputs[oi].clauses[ci].inclusions.remove(it);
         }
     }
 
@@ -57,49 +56,17 @@ impl TsetlinMachine {
             let s: f32 = rng.gen();
             if clause_state {
                 if input {
-                    if inclusion {
-                        if s < s_inverse_conjugate {
-                            self.outputs[oi].clauses[ci].automata_states[ai] += 1;
-                            self.inclusion_update(oi, ci, ai);
-                        }
-                    } else {
-                        if s < s_inverse_conjugate {
-                            self.outputs[oi].clauses[ci].automata_states[ai] += 1;
-                            self.inclusion_update(oi, ci, ai);
-                        }
-                    }
-                } else {
-                    if !inclusion && s < s_inverse {
-                        self.outputs[oi].clauses[ci].automata_states[ai] -= 1;
+                    if s < s_inverse_conjugate {
+                        self.outputs[oi].clauses[ci].automata_states[ai] += 1;
                         self.inclusion_update(oi, ci, ai);
                     }
+                } else if !inclusion && s < s_inverse {
+                    self.outputs[oi].clauses[ci].automata_states[ai] -= 1;
+                    self.inclusion_update(oi, ci, ai);
                 }
-            } else {
-                if input {
-                    if inclusion {
-                        if s < s_inverse {
-                            self.outputs[oi].clauses[ci].automata_states[ai] -= 1;
-                            self.inclusion_update(oi, ci, ai);
-                        }
-                    } else {
-                        if s < s_inverse {
-                            self.outputs[oi].clauses[ci].automata_states[ai] -= 1;
-                            self.inclusion_update(oi, ci, ai);
-                        }
-                    }
-                } else {
-                    if inclusion {
-                        if s < s_inverse {
-                            self.outputs[oi].clauses[ci].automata_states[ai] -= 1;
-                            self.inclusion_update(oi, ci, ai);
-                        }
-                    } else {
-                        if s < s_inverse {
-                            self.outputs[oi].clauses[ci].automata_states[ai] -= 1;
-                            self.inclusion_update(oi, ci, ai);
-                        }
-                    }
-                }
+            } else if s < s_inverse {
+                self.outputs[oi].clauses[ci].automata_states[ai] -= 1;
+                self.inclusion_update(oi, ci, ai);
             }
         }
     }
@@ -135,7 +102,7 @@ impl TsetlinMachine {
             for ci in 0..clauses_per_output {
                 self.outputs[oi].clauses[ci]
                     .automata_states
-                    .resize(number_of_inputs * (2 as usize), 0);
+                    .resize(number_of_inputs * 2_usize, 0);
             }
         }
         self.output_states.resize(number_of_outputs, false);
@@ -146,26 +113,24 @@ impl TsetlinMachine {
         let s_inv_conj = 1.0 - s_inv;
         for oi in 0..self.outputs.len() {
             let clamped_sum = t.min((-t).max(self.outputs[oi].sum as f32));
-            let rescale = 1.0 / ((2.0 * t) as f32);
+            let rescale = 1.0 / (2.0 * t);
             let probability_feedback_alpha = (t - clamped_sum) * rescale;
             let probability_feedback_beta = (t + clamped_sum) * rescale;
 
             for ci in 0..self.outputs[oi].clauses.len() {
                 let s: f32 = rng.gen();
-                if ci % 2 == 0 {
-                    if target_output_states[oi] {
-                        if s < probability_feedback_alpha {
+                if target_output_states[oi] {
+                    if s < probability_feedback_alpha {
+                        if ci % 2 == 0 {
                             self.modify_phase_one(oi, ci, s_inv, s_inv_conj, rng);
-                        }
-                    } else if s < probability_feedback_beta {
-                        self.modify_phase_two(oi, ci);
-                    }
-                } else {
-                    if target_output_states[oi] {
-                        if s < probability_feedback_alpha {
+                        } else {
                             self.modify_phase_two(oi, ci);
                         }
-                    } else if s < probability_feedback_beta {
+                    }
+                } else if s < probability_feedback_beta {
+                    if ci % 2 == 0 {
+                        self.modify_phase_two(oi, ci);
+                    } else {
                         self.modify_phase_one(oi, ci, s_inv, s_inv_conj, rng);
                     }
                 }
@@ -200,7 +165,6 @@ impl TsetlinMachine {
                 }
             }
             outputs_element.sum = sum;
-            //self.output_states[outputs_index] = sum > 0;
             self.output_states.set(outputs_index, sum > 0);
         }
         &self.output_states
@@ -219,47 +183,3 @@ struct Output {
     clauses: Vec<Clause>,
     sum: i32,
 }
-
-/*
-fn create_null_output() -> Output {
-    Output {
-        clauses: create_null_clauses_vector(),
-        sum: 0,
-    }
-}
-
-fn create_null_clauses_vector() -> Vec<Clause> {
-    Vec::new()
-}
-
-fn create_null_clause() -> Clause {
-    Clause {
-        automata_states: Vec::new(),
-        inclusions: Vec::new(),
-        state: false,
-    }
-}
-
-
-impl Clone for Output {
-    fn clone(&self) -> Output {
-        let c = &self.clauses;
-        Output {
-            clauses: c.to_vec(),
-            sum: self.sum,
-        }
-    }
-}
-
-impl Clone for Clause {
-    fn clone(&self) -> Clause {
-        let a = &self.automata_states;
-        let i = &self.inclusions;
-        Clause {
-            automata_states: a.to_vec(),
-            inclusions: i.to_vec(),
-            state: self.state,
-        }
-    }
-}
-*/
