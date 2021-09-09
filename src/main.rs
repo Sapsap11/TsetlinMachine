@@ -113,7 +113,7 @@ fn read(file_path: &str) -> (BooleanMatrix, BooleanMatrix) {
         let mut m = BitVec::repeat(false, 10);
         m.set(n.into(), true);
         //m[n as usize] = true;
-        return m;
+        m
     }
 
     fn converter(list: Vec<LabelWithData>) -> (BooleanMatrix, BooleanMatrix) {
@@ -154,12 +154,12 @@ fn read(file_path: &str) -> (BooleanMatrix, BooleanMatrix) {
 
 fn check_two_vectors(y_true: &BitVec, y_pred: &BitVec) -> bool {
     assert_eq!(y_true.len(), y_pred.len());
-    assert!(y_true.len() > 0);
+    assert!(!y_true.is_empty());
     //TODO: fancy zip().any().not() trick can be used here
     for i in 0..y_true.len() {
         if (y_true[i] && !y_pred[i]) || (!y_true[i] && y_pred[i]) {
             return false;
         }
     }
-    return true;
+    true
 }
