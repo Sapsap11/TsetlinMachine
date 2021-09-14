@@ -9,20 +9,7 @@ use bitvec::prelude::*;
 
 #[test]
 fn test_xor_convergence() {
-    /*
-    let inputs: Vec<Vec<bool>> = [[0, 0], [0, 1], [1, 0], [1, 1]]
-        .iter()
-        .map(|x| x.iter().map(|&y| y == 1).collect::<Vec<bool>>())
-        .collect();
-    */
     let inputs: Vec<BitVec> = vec![bitvec![0, 0], bitvec![0, 1], bitvec![1, 0], bitvec![1, 1]];
-
-    /*
-    let outputs: Vec<BitVec> = [[0, 1], [1, 0], [1, 0], [0, 1]]
-        .iter()
-        .map(|x| x.iter().map(|&y| y == 1).collect::<Vec<bool>>())
-        .collect();
-    */
     let outputs: Vec<BitVec> = vec![bitvec![0, 1], bitvec![1, 0], bitvec![1, 0], bitvec![0, 1]];
     let mut tm = TsetlinMachine::new();
     tm.create(2, 2, 10);
@@ -50,4 +37,3 @@ fn test_xor_convergence() {
 
     assert!(average_error < 0.01);
 }
-
