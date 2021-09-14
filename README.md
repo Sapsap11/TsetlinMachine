@@ -9,7 +9,7 @@ the machine was proposed in
 ## Running the XOR test
 
 
-- Clone this repository using `git clone https://github.com/KhaledSharif/TsetlinMachine.git`
+- Clone this repository using `git clone https://github.com/Sapsap11/TsetlinMachine.git`
 - Inside the repository root folder, run `cargo test`
 - The test will run the XOR example found in `tests/xor.rs`
 - The test will only pass if the Tsetlin Machine reaches an accuracy greater than 99% on XOR
