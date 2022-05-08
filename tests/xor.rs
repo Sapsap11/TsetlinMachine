@@ -8,11 +8,10 @@ extern crate bitvec;
 use bitvec::prelude::*;
 
 #[test]
-fn test_xor_convergence() {
+fn xor_convergence() {
     let inputs: Vec<BitVec> = vec![bitvec![0, 0], bitvec![0, 1], bitvec![1, 0], bitvec![1, 1]];
     let outputs: Vec<BitVec> = vec![bitvec![0, 1], bitvec![1, 0], bitvec![1, 0], bitvec![0, 1]];
-    let mut tm = TsetlinMachine::new();
-    tm.create(2, 2, 10);
+    let mut tm = TsetlinMachine::new(2, 2, 10);
 
     let mut rng = thread_rng();
     let mut average_error: f32 = 1.0;
@@ -20,13 +19,11 @@ fn test_xor_convergence() {
     for e in 0..5000 {
         let input_vector = &inputs[e % 4];
         {
-            let output_vector = tm.activate(input_vector.clone());
-            let mut correct = false;
-            if (input_vector[0] == input_vector[1]) && (!output_vector[0] && output_vector[1]) {
-                correct = true;
-            } else if output_vector[0] && !output_vector[1] {
-                correct = true;
-            }
+            let output_vector = tm.activate(input_vector);
+            let correct = (input_vector[0] == input_vector[1])
+                && (!output_vector[0] && output_vector[1])
+                || (output_vector[0] && !output_vector[1]);
+
             average_error = 0.99 * average_error + 0.01 * (if !correct { 1.0 } else { 0.0 });
         }
         tm.learn(&outputs[e % 4], 4.0, 4.0, &mut rng);
