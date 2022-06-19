@@ -6,49 +6,52 @@ use rand::rngs::ThreadRng;
 use rand::Rng;
 use std::cmp::min;
 
+//TODO: consider splitting negation/statements into two separate BitVecs, which clears up the usage at the cost of slightly more space usage
 #[derive(Debug, Default)]
 pub struct TsetlinMachine {
+    //TODO: think about what input and output states actually do, and if they are actually needed
+    // output_states seems like it is only used as an output of activate
     input_states: BitVec,
     output_states: BitVec,
     outputs: Vec<Output>,
 }
 
 impl TsetlinMachine {
+    /// Creates a new `TsetlinMachine` with the given parameters
+    #[must_use]
     pub fn new(
         number_of_inputs: usize,
         number_of_outputs: usize,
         clauses_per_output: usize,
     ) -> TsetlinMachine {
         //TODO: consider changing BitVec to BitArray[N], and placing N in the type sig, so this can get some more type safety for input and output
-        let input_states = BitVec::repeat(false, number_of_inputs);
-        let output_states = BitVec::repeat(false, number_of_outputs);
+        // This will make changing the input/output much harder, so should probably have a different version for that
         let mut outputs = vec![Output::default(); number_of_outputs];
-        for output in outputs.iter_mut() {
-            //TODO: avoid indexing via iter_mut
+        for output in &mut outputs {
             output.clauses.resize(clauses_per_output, Clause::default());
-            for clause in output.clauses.iter_mut() {
+            for clause in &mut output.clauses {
                 clause.automata_states.resize(number_of_inputs * 2_usize, 0);
             }
         }
         TsetlinMachine {
-            input_states,
-            output_states,
+            input_states: BitVec::repeat(false, number_of_inputs),
+            output_states: BitVec::repeat(false, number_of_outputs),
             outputs,
         }
     }
 
     fn inclusion_update(&mut self, oi: usize, ci: usize, ai: usize) {
         let inclusion = self.outputs[oi].clauses[ci].automata_states[ai] > 0;
-        let it = self.outputs[oi].clauses[ci]
+        let index = self.outputs[oi].clauses[ci]
             .inclusions
             .iter()
             .position(|&s| s == ai);
         if inclusion {
-            if it.is_none() {
+            if index.is_none() {
                 self.outputs[oi].clauses[ci].inclusions.push(ai);
             }
-        } else if let Some(it) = it {
-            self.outputs[oi].clauses[ci].inclusions.remove(it);
+        } else if let Some(index) = index {
+            self.outputs[oi].clauses[ci].inclusions.remove(index);
         }
     }
 
@@ -57,26 +60,29 @@ impl TsetlinMachine {
         &mut self,
         oi: usize,
         ci: usize,
-        s_inverse: f32,
-        s_inverse_conjugate: f32,
+        s_inverse: f64,
+        s_inverse_conjugate: f64,
         rng: &mut ThreadRng,
     ) {
         let clause_state = self.outputs[oi].clauses[ci].state;
+
         for ai in 0..self.outputs[oi].clauses[ci].automata_states.len() {
             let input = if ai >= self.input_states.len() {
                 !self.input_states[ai - self.input_states.len()]
             } else {
                 self.input_states[ai]
             };
-            let inclusion = self.outputs[oi].clauses[ci].automata_states[ai] > 0;
-            let s: f32 = rng.gen();
+
+            let remembered = self.outputs[oi].clauses[ci].automata_states[ai] > 0;
+            let s: f64 = rng.gen();
             if clause_state {
                 if input {
                     if s < s_inverse_conjugate {
                         self.outputs[oi].clauses[ci].automata_states[ai] += 1;
                         self.inclusion_update(oi, ci, ai);
                     }
-                } else if !inclusion && s < s_inverse {
+                } else if !remembered && s < s_inverse {
+                    //TODO: combine this section with the bottom one, until there are only 2 sections
                     self.outputs[oi].clauses[ci].automata_states[ai] -= 1;
                     self.inclusion_update(oi, ci, ai);
                 }
@@ -87,7 +93,7 @@ impl TsetlinMachine {
         }
     }
 
-    /// This does goes through the clause states and ?(updates the forgotten things up) and ??
+    /// This does goes through the clause states and ?(bubbles the forgotten things up) and ??
     fn modify_phase_two(&mut self, oi: usize, ci: usize) {
         let clause_state = self.outputs[oi].clauses[ci].state;
         for ai in 0..self.outputs[oi].clauses[ci].automata_states.len() {
@@ -97,27 +103,32 @@ impl TsetlinMachine {
             } else {
                 self.input_states[ai]
             };
-            let inclusion = self.outputs[oi].clauses[ci].automata_states[ai] > 0;
-            if clause_state && !input && !inclusion {
+            let remembered = self.outputs[oi].clauses[ci].automata_states[ai] > 0;
+            //TODO: consider inlining the definitions to avoid work
+            if clause_state && !input && !remembered {
                 self.outputs[oi].clauses[ci].automata_states[ai] += 1;
                 self.inclusion_update(oi, ci, ai);
             }
         }
     }
 
-    pub fn learn(&mut self, target_output_states: &BitVec, s: f32, t: f32, rng: &mut ThreadRng) {
-        //TODO: what does the s and t here even mean??
-        let s_inv = 1.0 / s;
-        let s_inv_conj = 1.0 - s_inv;
+    /// Learns some bit of data for a targeted output state
+    /// # Panics
+    /// Will panic if target output states is a different length than outputs length
+    pub fn learn(&mut self, target_output_states: &BitVec, s: f64, t: f64, rng: &mut ThreadRng) {
+        //TODO: what does the s and t here even mean?? consider getting better names
+        let s_inv: f64 = 1.0 / s;
+        let s_inv_conj: f64 = 1.0 - s_inv;
         assert_eq!(self.outputs.len(), target_output_states.len());
+
         for oi in 0..self.outputs.len() {
-            let clamped_sum = t.min((-t).max(self.outputs[oi].sum as f32));
+            let clamped_sum = t.min((-t).max(self.outputs[oi].sum.into()));
             let rescale = 1.0 / (2.0 * t);
-            let probability_feedback_alpha = (t - clamped_sum) * rescale;
-            let probability_feedback_beta = (t + clamped_sum) * rescale;
+            let probability_feedback_alpha: f64 = (t - clamped_sum) * rescale;
+            let probability_feedback_beta: f64 = (t + clamped_sum) * rescale;
 
             for ci in 0..self.outputs[oi].clauses.len() {
-                let s: f32 = rng.gen();
+                let s: f64 = rng.gen();
                 //TODO: check if this is the best/most predictable order
                 if target_output_states[oi] {
                     //TODO: flipping the == to != also fixes the learning
@@ -139,14 +150,15 @@ impl TsetlinMachine {
         }
     }
 
+    /// Gives the predicted output for the given input
     pub fn activate(&mut self, input_states: &BitVec) -> &BitVec {
+        //TODO: does this really need to lend out the output states? does the structure of this need to be redone?
         self.input_states = input_states.clone();
         for (outputs_index, mut outputs_element) in self.outputs.iter_mut().enumerate() {
             let mut sum = 0;
             for (clauses_index, clauses_element) in outputs_element.clauses.iter_mut().enumerate() {
                 let mut state = true;
-                for cit in clauses_element.inclusions.iter() {
-                    let ai = *cit;
+                for &ai in &clauses_element.inclusions {
                     if ai >= self.input_states.len() {
                         state = state
                             && !self.input_states
@@ -157,12 +169,11 @@ impl TsetlinMachine {
                 }
                 clauses_element.state = state;
                 {
-                    let _state = if state { 1 } else { 0 };
                     //TODO: if this is flipped, everything seems to work
                     sum += if clauses_index % 2 == 0 {
-                        _state
+                        i32::from(state)
                     } else {
-                        -_state
+                        -i32::from(state)
                     };
                 }
             }
@@ -188,3 +199,4 @@ struct Output {
     clauses: Vec<Clause>,
     sum: i32,
 }
+//TODO: implement a new for output which simplifies the creation in the original new function
