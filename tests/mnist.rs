@@ -18,6 +18,10 @@ const TRAINING_SET_LENGTH: usize = 50_000;
 const VALIDATION_SET_LENGTH: usize = 10_000;
 const TEST_SET_LENGTH: usize = 10_000;
 
+fn avg(nums: &[f32]) -> f32 {
+    nums.iter().sum::<f32>() / (nums.len() as f32)
+}
+
 #[test]
 fn mnist_accuracy() {
     let Mnist {
@@ -55,11 +59,10 @@ fn mnist_accuracy() {
         .map(|x| (x as usize).view_bits::<Lsb0>().to_bitvec())
         .collect();
 
-    //TODO: second argument needs to be the size of the input argument?
     let mut tm = TsetlinMachine::new(100, 64, 100);
 
     let mut rng = thread_rng();
-    let mut average_error: f32 = 1.0;
+    let mut errors: Vec<f32> = Vec::with_capacity(TRAINING_AMOUNT);
 
     for e in 0..TRAINING_AMOUNT {
         let input_vector = BitVec::from_vec(
@@ -73,17 +76,17 @@ fn mnist_accuracy() {
         );
         let output_vector = tm.activate(&input_vector);
         let correct = output_vector == &train_labels[e % TRAINING_SET_LENGTH as usize];
-        average_error = 0.99 * average_error + 0.01 * (if !correct { 1.0 } else { 0.0 });
+        errors.push(!correct as u8 as f32);
         tm.learn(
             &train_labels[e % TRAINING_SET_LENGTH as usize],
             4.0,
             4.0,
             &mut rng,
         );
-        if average_error < 0.01 {
+        if avg(&errors) < 0.01 {
             break;
         }
     }
 
-    assert!(average_error < 0.01, "avg error was: {}", average_error);
+    assert!(avg(&errors) < 0.01, "avg error was: {}", avg(&errors));
 }

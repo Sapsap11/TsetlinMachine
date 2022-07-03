@@ -3,6 +3,12 @@ name = "tsetlin_machine"
 version = "0.0.1"
 authors = ["Erling Indstøy Langlo <eplepai99@gmail.com>"]
 
+[profile.release]
+lto = "thin"
+
+[profile.dev.package."*"]
+opt-level = 3
+
 [dependencies]
 rand = "0.8.4"
 csv = "1.0.0-beta.5"

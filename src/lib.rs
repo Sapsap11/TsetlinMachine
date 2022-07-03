@@ -4,15 +4,15 @@ extern crate rand;
 use bitvec::prelude::*;
 use rand::rngs::ThreadRng;
 use rand::Rng;
-use std::cmp::min;
 
-//TODO: consider splitting negation/statements into two separate BitVecs, which clears up the usage at the cost of slightly more space usage
 #[derive(Debug, Default)]
 pub struct TsetlinMachine {
     //TODO: think about what input and output states actually do, and if they are actually needed
     // output_states seems like it is only used as an output of activate
+    // however, it stops learning when it is removed
     input_states: BitVec,
     output_states: BitVec,
+    // TODO: split up this into positive and negative assertions
     outputs: Vec<Output>,
 }
 
@@ -26,13 +26,15 @@ impl TsetlinMachine {
     ) -> TsetlinMachine {
         //TODO: consider changing BitVec to BitArray[N], and placing N in the type sig, so this can get some more type safety for input and output
         // This will make changing the input/output much harder, so should probably have a different version for that
-        let mut outputs = vec![Output::default(); number_of_outputs];
+        let outputs = vec![Output::new(clauses_per_output, number_of_outputs); number_of_outputs];
+        /*
         for output in &mut outputs {
             output.clauses.resize(clauses_per_output, Clause::default());
             for clause in &mut output.clauses {
                 clause.automata_states.resize(number_of_inputs * 2_usize, 0);
             }
         }
+        */
         TsetlinMachine {
             input_states: BitVec::repeat(false, number_of_inputs),
             output_states: BitVec::repeat(false, number_of_outputs),
@@ -40,6 +42,7 @@ impl TsetlinMachine {
         }
     }
 
+    //TODO: somehow describe what this does?
     fn inclusion_update(&mut self, oi: usize, ci: usize, ai: usize) {
         let inclusion = self.outputs[oi].clauses[ci].automata_states[ai] > 0;
         let index = self.outputs[oi].clauses[ci]
@@ -60,8 +63,8 @@ impl TsetlinMachine {
         &mut self,
         oi: usize,
         ci: usize,
-        s_inverse: f64,
-        s_inverse_conjugate: f64,
+        learning_rate: f64,
+        forgetting_rate: f64,
         rng: &mut ThreadRng,
     ) {
         let clause_state = self.outputs[oi].clauses[ci].state;
@@ -75,18 +78,28 @@ impl TsetlinMachine {
 
             let remembered = self.outputs[oi].clauses[ci].automata_states[ai] > 0;
             let s: f64 = rng.gen();
+            /*
             if clause_state {
                 if input {
-                    if s < s_inverse_conjugate {
+                    //TODO: is the learing/forgetting rate correct?
+                    if s < forgetting_rate {
                         self.outputs[oi].clauses[ci].automata_states[ai] += 1;
                         self.inclusion_update(oi, ci, ai);
                     }
-                } else if !remembered && s < s_inverse {
+                } else if !remembered && s < learning_rate {
                     //TODO: combine this section with the bottom one, until there are only 2 sections
                     self.outputs[oi].clauses[ci].automata_states[ai] -= 1;
                     self.inclusion_update(oi, ci, ai);
                 }
-            } else if s < s_inverse {
+            } else if s < learning_rate {
+                self.outputs[oi].clauses[ci].automata_states[ai] -= 1;
+                self.inclusion_update(oi, ci, ai);
+            }
+            */
+            if clause_state && input && s < forgetting_rate {
+                self.outputs[oi].clauses[ci].automata_states[ai] += 1;
+                self.inclusion_update(oi, ci, ai);
+            } else if s < learning_rate || (clause_state && !remembered) {
                 self.outputs[oi].clauses[ci].automata_states[ai] -= 1;
                 self.inclusion_update(oi, ci, ai);
             }
@@ -112,38 +125,46 @@ impl TsetlinMachine {
         }
     }
 
-    /// Learns some bit of data for a targeted output state
+    /// Updates the model to try and learn some features for a given target
     /// # Panics
     /// Will panic if target output states is a different length than outputs length
-    pub fn learn(&mut self, target_output_states: &BitVec, s: f64, t: f64, rng: &mut ThreadRng) {
-        //TODO: what does the s and t here even mean?? consider getting better names
-        let s_inv: f64 = 1.0 / s;
-        let s_inv_conj: f64 = 1.0 - s_inv;
+    pub fn learn(
+        &mut self,
+        target_output_states: &BitVec,
+        learning_volatility: f64,
+        t: f64,
+        rng: &mut ThreadRng,
+    ) {
+        //TODO: what does the t here even mean?? consider getting better names
+        fn clamp(min: f64, value: f64, max: f64) -> f64 {
+            min.max(max.min(value))
+        }
+        let learn_rate: f64 = 1.0 / learning_volatility;
+        let forget_rate: f64 = 1.0 - learn_rate;
         assert_eq!(self.outputs.len(), target_output_states.len());
 
         for oi in 0..self.outputs.len() {
-            let clamped_sum = t.min((-t).max(self.outputs[oi].sum.into()));
-            let rescale = 1.0 / (2.0 * t);
-            let probability_feedback_alpha: f64 = (t - clamped_sum) * rescale;
-            let probability_feedback_beta: f64 = (t + clamped_sum) * rescale;
+            let clamped_sum = clamp(-t, self.outputs[oi].sum.into(), t);
+            let rescale = t * 0.5;
+            let alpha_chance: f64 = (t - clamped_sum) * rescale;
+            let beta_chance: f64 = (t + clamped_sum) * rescale;
 
             for ci in 0..self.outputs[oi].clauses.len() {
                 let s: f64 = rng.gen();
                 //TODO: check if this is the best/most predictable order
                 if target_output_states[oi] {
-                    //TODO: flipping the == to != also fixes the learning
-                    if s < probability_feedback_alpha {
+                    if s < alpha_chance {
                         if ci % 2 == 0 {
-                            self.modify_phase_one(oi, ci, s_inv, s_inv_conj, rng);
+                            self.modify_phase_one(oi, ci, learn_rate, forget_rate, rng);
                         } else {
                             self.modify_phase_two(oi, ci);
                         }
                     }
-                } else if s < probability_feedback_beta {
+                } else if s < beta_chance {
                     if ci % 2 == 0 {
                         self.modify_phase_two(oi, ci);
                     } else {
-                        self.modify_phase_one(oi, ci, s_inv, s_inv_conj, rng);
+                        self.modify_phase_one(oi, ci, learn_rate, forget_rate, rng);
                     }
                 }
             }
@@ -160,16 +181,13 @@ impl TsetlinMachine {
                 let mut state = true;
                 for &ai in &clauses_element.inclusions {
                     if ai >= self.input_states.len() {
-                        state = state
-                            && !self.input_states
-                                [min(self.input_states.len() - 1, ai - self.input_states.len())];
+                        state = state && !self.input_states[ai - self.input_states.len()];
                     } else {
                         state = state && self.input_states[ai];
                     }
                 }
                 clauses_element.state = state;
                 {
-                    //TODO: if this is flipped, everything seems to work
                     sum += if clauses_index % 2 == 0 {
                         i32::from(state)
                     } else {
@@ -184,6 +202,7 @@ impl TsetlinMachine {
     }
 }
 
+///A Clause in a `TsetlinMachine`, this contains the actual state of the Clause
 #[derive(Debug, Default, Clone)]
 struct Clause {
     //TODO: is it sane to make this a specific size as well?
@@ -193,10 +212,30 @@ struct Clause {
     state: bool,
 }
 
+impl Clause {
+    fn new(number_of_inputs: usize) -> Self {
+        //TODO: replace this with a simple construction
+        let mut clause = Clause::default();
+        clause.automata_states.resize(number_of_inputs * 2, 0);
+        clause
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 struct Output {
     //TODO: consider adding the size(s?) to the type signature for this?
     clauses: Vec<Clause>,
     sum: i32,
+}
+
+impl Output {
+    fn new(clauses_per_output: usize, number_of_inputs: usize) -> Self {
+        //TODO: replace this with a simple construction
+        let mut output = Output::default();
+        output
+            .clauses
+            .resize(clauses_per_output, Clause::new(number_of_inputs));
+        output
+    }
 }
 //TODO: implement a new for output which simplifies the creation in the original new function
